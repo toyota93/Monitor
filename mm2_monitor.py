@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 # CONFIG
 # =========================================================
 
-MM2_WEBHOOK = "https://discord.com/api/webhooks/1544142494692802660/VlCsdLJOxAvKqlPQ0DJlBMHj5M6wVmJryXC_3Ns8rS5hOqq5ccMvUnsomEsUk1d6SCJY"
-NIKILIS_WEBHOOK = "https://discord.com/api/webhooks/1544142698892632074/2kFsS_-Xbm8I4PcZwxMTvF4LlaP1kAA6ya8wo8zOb6g8nFFZ31UFM7-pM3zEUR47_J9I"
-TESTING_WEBHOOK = "https://discord.com/api/webhooks/1544142799098880130/PfjTtdvwZ6bkZ7F6H5DvrQdilklqRyCBdfZdWtyVPbpeBQ9iPh66nE_9KPjwKn4Rytpm"
+MM2_WEBHOOK = os.getenv("MM2_WEBHOOK")
+NIKILIS_WEBHOOK = os.getenv("NIKILIS_WEBHOOK")
+TESTING_WEBHOOK = os.getenv("TESTING_WEBHOOK")
 
 CHECK_INTERVAL = 30
 
