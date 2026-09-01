@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 # CONFIG
 # =========================================================
 
+# These are stored privately in Railway Variables
 MM2_WEBHOOK = os.getenv("MM2_WEBHOOK")
 NIKILIS_WEBHOOK = os.getenv("NIKILIS_WEBHOOK")
 TESTING_WEBHOOK = os.getenv("TESTING_WEBHOOK")
@@ -27,7 +28,7 @@ TESTING_PLACE_ID = 188331334
 STATE_FILE = "mm2_monitor_state.json"
 
 HEADERS = {
-    "User-Agent": "MM2-Monitor/1.0"
+    "User-Agent": "MM2-Monitor/2.0"
 }
 
 
@@ -35,9 +36,18 @@ HEADERS = {
 # DISCORD WEBHOOK
 # =========================================================
 
-def send_webhook(webhook_url, title, description, color=0x5865F2, url=None):
+def send_webhook(
+    webhook_url,
+    title,
+    description,
+    color=0x5865F2,
+    url=None,
+    image_url=None,
+    thumbnail_url=None,
+    ping=False
+):
 
-    if not webhook_url or "PASTE_NEW" in webhook_url:
+    if not webhook_url:
         print(f"[WEBHOOK NOT SET] {title}")
         return
 
@@ -47,23 +57,40 @@ def send_webhook(webhook_url, title, description, color=0x5865F2, url=None):
         "color": color,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "footer": {
-            "text": "MM2 Monitor"
+            "text": "MM2 Monitor • Roblox Tracker"
         }
     }
 
     if url:
         embed["url"] = url
 
+    if image_url:
+        embed["image"] = {
+            "url": image_url
+        }
+
+    if thumbnail_url:
+        embed["thumbnail"] = {
+            "url": thumbnail_url
+        }
+
     payload = {
         "username": "MM2 Monitor",
         "embeds": [embed]
     }
 
+    # Only real alerts ping everyone
+    if ping:
+        payload["content"] = "@everyone"
+        payload["allowed_mentions"] = {
+            "parse": ["everyone"]
+        }
+
     try:
         response = requests.post(
             webhook_url,
             json=payload,
-            timeout=10
+            timeout=15
         )
 
         if response.status_code not in (200, 204):
@@ -77,7 +104,7 @@ def send_webhook(webhook_url, title, description, color=0x5865F2, url=None):
 
 
 # =========================================================
-# SAVE / LOAD STATE
+# STATE
 # =========================================================
 
 def load_state():
@@ -166,12 +193,94 @@ def get_presence(user_id):
 
     response.raise_for_status()
 
-    data = response.json().get("userPresences", [])
+    data = response.json().get(
+        "userPresences",
+        []
+    )
 
     if not data:
         return None
 
     return data[0]
+
+
+# =========================================================
+# ROBLOX IMAGES
+# =========================================================
+
+def get_game_thumbnail(universe_id):
+
+    try:
+
+        url = (
+            "https://thumbnails.roblox.com/v1/"
+            "games/icons"
+        )
+
+        response = requests.get(
+            url,
+            params={
+                "universeIds": universe_id,
+                "returnPolicy": "PlaceHolder",
+                "size": "512x512",
+                "format": "Png",
+                "isCircular": "false"
+            },
+            headers=HEADERS,
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+        data = response.json().get("data", [])
+
+        if data:
+            return data[0].get("imageUrl")
+
+    except Exception as e:
+        print(
+            "[GAME THUMBNAIL ERROR]",
+            e
+        )
+
+    return None
+
+
+def get_avatar_headshot(user_id):
+
+    try:
+
+        url = (
+            "https://thumbnails.roblox.com/v1/"
+            "users/avatar-headshot"
+        )
+
+        response = requests.get(
+            url,
+            params={
+                "userIds": user_id,
+                "size": "420x420",
+                "format": "Png",
+                "isCircular": "false"
+            },
+            headers=HEADERS,
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+        data = response.json().get("data", [])
+
+        if data:
+            return data[0].get("imageUrl")
+
+    except Exception as e:
+        print(
+            "[AVATAR ERROR]",
+            e
+        )
+
+    return None
 
 
 # =========================================================
@@ -188,7 +297,9 @@ PRESENCE_NAMES = {
 
 def check_nikilis(state):
 
-    presence = get_presence(NIKILIS_USER_ID)
+    presence = get_presence(
+        NIKILIS_USER_ID
+    )
 
     if not presence:
         return
@@ -202,9 +313,15 @@ def check_nikilis(state):
         "nikilis_presence"
     )
 
+    # ---------------------------------------------
     # First run
+    # ---------------------------------------------
+
     if previous_presence is None:
-        state["nikilis_presence"] = current_presence
+
+        state["nikilis_presence"] = (
+            current_presence
+        )
 
         print(
             "[INIT] Nikilis status:",
@@ -216,8 +333,14 @@ def check_nikilis(state):
 
         return
 
-    # Came online
-    if previous_presence == 0 and current_presence != 0:
+    # ---------------------------------------------
+    # Nikilis came online
+    # ---------------------------------------------
+
+    if (
+        previous_presence == 0
+        and current_presence != 0
+    ):
 
         status = PRESENCE_NAMES.get(
             current_presence,
@@ -229,49 +352,62 @@ def check_nikilis(state):
             "Roblox"
         )
 
+        avatar = get_avatar_headshot(
+            NIKILIS_USER_ID
+        )
+
         description = (
-            f"**Nikilis just came online!**\n\n"
-            f"Status: `{status}`\n"
-            f"Location: `{location}`"
+            "### 👤 Nikilis Activity Detected\n\n"
+            "Nikilis just came online on Roblox.\n\n"
+            f"🟢 **Status:** `{status}`\n"
+            f"📍 **Location:** `{location}`"
         )
 
         place_id = presence.get("placeId")
 
         if place_id:
+
             description += (
-                f"\n\n🎮 "
-                f"https://www.roblox.com/games/{place_id}"
+                "\n\n"
+                f"🎮 **Current Place:** "
+                f"[Join / View Game]"
+                f"(https://www.roblox.com/games/"
+                f"{place_id})"
             )
 
         send_webhook(
             NIKILIS_WEBHOOK,
-            "🟢 Nikilis is Online",
+            "🟢 Nikilis Is Online!",
             description,
             0x57F287,
-            "https://www.roblox.com/users/1848960/profile"
+            (
+                "https://www.roblox.com/users/"
+                "1848960/profile"
+            ),
+            thumbnail_url=avatar,
+            ping=True
         )
 
-        print("[ALERT] Nikilis came online.")
+        print(
+            "[ALERT] Nikilis came online."
+        )
 
+    # ---------------------------------------------
     # Went offline
-    elif previous_presence != 0 and current_presence == 0:
+    # ---------------------------------------------
 
-        print("[INFO] Nikilis went offline.")
+    elif (
+        previous_presence != 0
+        and current_presence == 0
+    ):
 
-        # If you WANT an offline Discord alert too,
-        # uncomment this section:
-
-        """
-        send_webhook(
-            NIKILIS_WEBHOOK,
-            "🔴 Nikilis went Offline",
-            "Nikilis is no longer online on Roblox.",
-            0xED4245,
-            "https://www.roblox.com/users/1848960/profile"
+        print(
+            "[INFO] Nikilis went offline."
         )
-        """
 
-    state["nikilis_presence"] = current_presence
+    state["nikilis_presence"] = (
+        current_presence
+    )
 
 
 # =========================================================
@@ -285,22 +421,42 @@ def check_game_update(
     place_id,
     display_name,
     webhook_url,
-    color
+    color,
+    icon
 ):
 
-    info = get_game_info(universe_id)
+    info = get_game_info(
+        universe_id
+    )
 
     if not info:
         return
 
     updated = info.get("updated")
-    name = info.get("name", display_name)
-    playing = info.get("playing", 0)
-    visits = info.get("visits", 0)
 
-    previous_update = state.get(state_key)
+    name = info.get(
+        "name",
+        display_name
+    )
 
+    playing = info.get(
+        "playing",
+        0
+    )
+
+    visits = info.get(
+        "visits",
+        0
+    )
+
+    previous_update = state.get(
+        state_key
+    )
+
+    # ---------------------------------------------
     # First run
+    # ---------------------------------------------
+
     if previous_update is None:
 
         state[state_key] = updated
@@ -312,24 +468,49 @@ def check_game_update(
 
         return
 
-    # Update detected
+    # ---------------------------------------------
+    # UPDATE DETECTED
+    # ---------------------------------------------
+
     if updated != previous_update:
 
+        game_thumbnail = (
+            get_game_thumbnail(
+                universe_id
+            )
+        )
+
+        game_url = (
+            f"https://www.roblox.com/"
+            f"games/{place_id}"
+        )
+
         description = (
-            f"**{display_name} was updated!**\n\n"
-            f"Game: `{name}`\n"
-            f"Updated: `{updated}`\n"
-            f"Players: `{playing:,}`\n"
-            f"Visits: `{visits:,}`\n\n"
-            f"🎮 https://www.roblox.com/games/{place_id}"
+            f"### {icon} Update Detected\n\n"
+            f"**{name}** was just updated "
+            f"on Roblox!\n\n"
+            f"👥 **Players Online:** "
+            f"`{playing:,}`\n"
+            f"👁️ **Total Visits:** "
+            f"`{visits:,}`\n"
+            f"🕒 **Roblox Updated:** "
+            f"`{updated}`\n\n"
+            f"🎮 **[OPEN GAME]({game_url})**"
         )
 
         send_webhook(
             webhook_url,
-            f"🚨 {display_name} Updated",
+            f"{icon} {display_name} Updated!",
             description,
             color,
-            f"https://www.roblox.com/games/{place_id}"
+            game_url,
+            image_url=game_thumbnail,
+            ping=True
+        )
+
+        print()
+        print(
+            "=" * 55
         )
 
         print(
@@ -337,41 +518,118 @@ def check_game_update(
         )
 
         print(
-            f"Old: {previous_update}"
+            f"OLD: {previous_update}"
         )
 
         print(
-            f"New: {updated}"
+            f"NEW: {updated}"
         )
+
+        print(
+            "=" * 55
+        )
+
+        print()
 
         state[state_key] = updated
 
 
 # =========================================================
-# STARTUP TEST
+# STARTUP MESSAGES
 # =========================================================
 
-def startup_messages():
+def startup_messages(
+    testing_universe_id
+):
+
+    mm2_thumbnail = (
+        get_game_thumbnail(
+            MM2_UNIVERSE_ID
+        )
+    )
+
+    testing_thumbnail = (
+        get_game_thumbnail(
+            testing_universe_id
+        )
+    )
+
+    nikilis_avatar = (
+        get_avatar_headshot(
+            NIKILIS_USER_ID
+        )
+    )
+
+    # ---------------------------------------------
+    # MM2
+    # ---------------------------------------------
 
     send_webhook(
         MM2_WEBHOOK,
-        "✅ MM2 Monitor Started",
-        "Now monitoring Murder Mystery 2 for updates.",
-        0x57F287
+        "🔪 MM2 Monitor Online",
+        (
+            "### Murder Mystery 2\n\n"
+            "✅ Update monitoring is active.\n\n"
+            "I'll send an alert as soon as "
+            "Roblox reports a new update.\n\n"
+            f"⏱️ **Check interval:** "
+            f"`{CHECK_INTERVAL} seconds`"
+        ),
+        0xED4245,
+        (
+            "https://www.roblox.com/games/"
+            f"{MM2_PLACE_ID}"
+        ),
+        image_url=mm2_thumbnail,
+        ping=False
     )
+
+    # ---------------------------------------------
+    # NIKILIS
+    # ---------------------------------------------
 
     send_webhook(
         NIKILIS_WEBHOOK,
-        "✅ Nikilis Monitor Started",
-        "Now monitoring Nikilis's Roblox presence.",
-        0x57F287
+        "👤 Nikilis Monitor Online",
+        (
+            "### Nikilis Presence Tracker\n\n"
+            "✅ Presence monitoring is active.\n\n"
+            "I'll send an alert when Nikilis "
+            "comes online on Roblox.\n\n"
+            f"⏱️ **Check interval:** "
+            f"`{CHECK_INTERVAL} seconds`"
+        ),
+        0x57F287,
+        (
+            "https://www.roblox.com/users/"
+            "1848960/profile"
+        ),
+        thumbnail_url=nikilis_avatar,
+        ping=False
     )
+
+    # ---------------------------------------------
+    # TESTING SERVER
+    # ---------------------------------------------
 
     send_webhook(
         TESTING_WEBHOOK,
-        "✅ Testing Server Monitor Started",
-        "Now monitoring the MM2 Testing Server for updates.",
-        0x57F287
+        "🧪 Testing Server Monitor Online",
+        (
+            "### MM2 Testing Server\n\n"
+            "✅ Update monitoring is active.\n\n"
+            "I'll send an alert as soon as "
+            "the testing server changes.\n\n"
+            f"⏱️ **Check interval:** "
+            f"`{CHECK_INTERVAL} seconds`"
+        ),
+        0x5865F2,
+        (
+            "https://www.roblox.com/games/"
+            f"{TESTING_PLACE_ID}"
+        ),
+        image_url=testing_thumbnail,
+        ping=False
     )
 
 
@@ -381,17 +639,30 @@ def startup_messages():
 
 def main():
 
-    print("=" * 55)
-    print("MM2 MONITOR STARTING")
-    print("=" * 55)
+    print(
+        "=" * 55
+    )
+
+    print(
+        "MM2 MONITOR V2 STARTING"
+    )
+
+    print(
+        "=" * 55
+    )
 
     state = load_state()
 
-    # Get testing server universe ID automatically
+    # ---------------------------------------------
+    # Resolve Testing Server universe
+    # ---------------------------------------------
+
     try:
 
-        testing_universe_id = get_universe_id(
-            TESTING_PLACE_ID
+        testing_universe_id = (
+            get_universe_id(
+                TESTING_PLACE_ID
+            )
         )
 
         print(
@@ -402,8 +673,8 @@ def main():
     except Exception as e:
 
         print(
-            "[ERROR] Could not get testing "
-            "server universe ID:",
+            "[ERROR] Could not get "
+            "Testing Server Universe ID:",
             e
         )
 
@@ -411,24 +682,37 @@ def main():
 
     print()
     print("Monitoring:")
-    print("• Murder Mystery 2 updates")
-    print("• MM2 Testing Server updates")
-    print("• Nikilis online status")
-    print()
-    print(
-        f"Checking every {CHECK_INTERVAL} seconds."
-    )
+    print("🔪 Murder Mystery 2")
+    print("🧪 MM2 Testing Server")
+    print("👤 Nikilis")
     print()
 
-    startup_messages()
+    print(
+        f"Checking every "
+        f"{CHECK_INTERVAL} seconds."
+    )
+
+    print()
+
+    # ---------------------------------------------
+    # Send startup messages
+    # ---------------------------------------------
+
+    startup_messages(
+        testing_universe_id
+    )
+
+    # ---------------------------------------------
+    # Monitor forever
+    # ---------------------------------------------
 
     while True:
 
         try:
 
-            # ---------------------------------------------
-            # Main Murder Mystery 2
-            # ---------------------------------------------
+            # =====================================
+            # MAIN MM2
+            # =====================================
 
             check_game_update(
                 state,
@@ -437,12 +721,13 @@ def main():
                 MM2_PLACE_ID,
                 "Murder Mystery 2",
                 MM2_WEBHOOK,
-                0xFEE75C
+                0xED4245,
+                "🔪"
             )
 
-            # ---------------------------------------------
-            # Testing Server
-            # ---------------------------------------------
+            # =====================================
+            # TESTING SERVER
+            # =====================================
 
             check_game_update(
                 state,
@@ -451,21 +736,27 @@ def main():
                 TESTING_PLACE_ID,
                 "MM2 Testing Server",
                 TESTING_WEBHOOK,
-                0x5865F2
+                0x5865F2,
+                "🧪"
             )
 
-            # ---------------------------------------------
-            # Nikilis
-            # ---------------------------------------------
+            # =====================================
+            # NIKILIS
+            # =====================================
 
-            check_nikilis(state)
+            check_nikilis(
+                state
+            )
 
-            # Save everything
-            save_state(state)
+            # Save current state
+            save_state(
+                state
+            )
 
             print(
-                f"[{datetime.now().strftime('%I:%M:%S %p')}] "
-                "Checked Roblox."
+                f"["
+                f"{datetime.now().strftime('%I:%M:%S %p')}"
+                f"] Roblox checked ✓"
             )
 
         except requests.exceptions.RequestException as e:
@@ -478,7 +769,10 @@ def main():
         except KeyboardInterrupt:
 
             print()
-            print("Monitor stopped.")
+            print(
+                "Monitor stopped."
+            )
+
             break
 
         except Exception as e:
@@ -488,7 +782,9 @@ def main():
                 e
             )
 
-        time.sleep(CHECK_INTERVAL)
+        time.sleep(
+            CHECK_INTERVAL
+        )
 
 
 # =========================================================
